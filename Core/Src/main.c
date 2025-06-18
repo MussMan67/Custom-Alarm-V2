@@ -171,7 +171,7 @@ uint32_t lastRepeatTime = 0;
 		// convert analog pot value to time
 		HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
 		// set new time
-		wakeUpTime = (float) (HAL_ADC_GetValue(&hadc1)) / 256 * totalTime + currentTime;
+		wakeUpTime = (float) (HAL_ADC_GetValue(&hadc1)) / 1024 * totalTime + currentTime;
 		// light up the corresponding number of LEDs
 		CALC_LED();
 		UPDATE_LED();
@@ -231,11 +231,18 @@ uint32_t lastRepeatTime = 0;
 
 	void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 		if (GPIO_Pin == STOP_Pin) {
+			MP3_PLAY();
+			HAL_Delay(2000);
 			STOP_ALARM();
+			USER_LED_BLINK();
 		}
 
 		if (GPIO_Pin == SKIP_Pin) {
+			wakeUpTime == 100;
 			SKIP_ALARM();
+			if (wakeUpTime > 199) {
+				USER_LED_BLINK();
+			}
 		}
 
 		if (GPIO_Pin == MUTE_Pin) {
@@ -270,9 +277,51 @@ uint32_t lastRepeatTime = 0;
 	}
 
 	void USER_LED_BLINK() {
-			USER_LED(0);
-			HAL_Delay(.5 * 1000);
-			USER_LED(1);
+		USER_LED(0);
+		HAL_Delay(.5 * 1000);
+		USER_LED(1);
+	}
+
+
+	void testVolume(void) {
+		MP3_PLAY();
+		currentTime = 0;
+		while (currentTime < 10) {
+			UPDATE_VOLUME();
+			// ADJUST PHYSICAL VOLUME KNOB
+		}
+		USER_LED_BLINK();
+	}
+
+	void testTime(void) {
+		wakeUpTime = 0;
+		HAL_Delay(3000); // MOVE PHYSICAL TIME KNOB TO 0
+		if (wakeUpTime == 0) USER_LED_BLINK();
+
+		HAL_Delay(3000); // MOVE PHYSICAL TIME KNOB TO 12
+		if (wakeUpTime == 12 * 60 * 60) USER_LED_BLINK();
+
+		HAL_Delay(3000); // MOVE PHYSICAL TIME KNOB TO 6
+		if (wakeUpTime > 5 * 60 * 60 && wakeUpTime < 7 * 60 * 60) USER_LED_BLINK();
+	}
+
+	void testMute(void) {
+		SOUND_RUMBLE(.5);
+		HAL_Delay(3000); // PRESS PHYSICAL MUTE SWITCH
+		USER_LED_BLINK();
+	}
+
+	void testSkip(void) {
+		wakeUpTime == 100;
+		HAL_Delay(3000); // PRESS PHYSICAL SKIP BUTTON
+		if (wakeUpTime >= 200) USER_LED_BLINK();
+	}
+
+	void testStop(void) {
+		wakeUpTime == currentTime;
+		SOUND_ALARM();
+		HAL_Delay(3000); // PRESS PHYSICAL STOP BUTTON
+		USER_LED_BLINK();
 	}
 
 /* USER CODE END 0 */
@@ -322,7 +371,7 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-
+	
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -397,7 +446,7 @@ static void MX_ADC1_Init(void)
   */
   hadc1.Instance = ADC1;
   hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV8;
-  hadc1.Init.Resolution = ADC_RESOLUTION_8B;
+  hadc1.Init.Resolution = ADC_RESOLUTION_10B;
   hadc1.Init.ScanConvMode = DISABLE;
   hadc1.Init.ContinuousConvMode = DISABLE;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
