@@ -270,9 +270,9 @@ uint32_t lastRepeatTime = 0;
 	}
 
 	void USER_LED_BLINK() {
-			USER_LED(0);
-			HAL_Delay(.5 * 1000);
-			USER_LED(1);
+		USER_LED(0);
+		HAL_Delay(.5 * 1000);
+		USER_LED(1);
 	}
 
 /* USER CODE END 0 */
@@ -397,7 +397,7 @@ static void MX_ADC1_Init(void)
   */
   hadc1.Instance = ADC1;
   hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV8;
-  hadc1.Init.Resolution = ADC_RESOLUTION_8B;
+  hadc1.Init.Resolution = ADC_RESOLUTION_10B;
   hadc1.Init.ScanConvMode = DISABLE;
   hadc1.Init.ContinuousConvMode = DISABLE;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
