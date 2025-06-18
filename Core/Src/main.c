@@ -283,7 +283,7 @@ uint32_t lastRepeatTime = 0;
 	}
 
 
-	void testVolume(void) {
+	void TEST_VOLUME(void) {
 		MP3_PLAY();
 		currentTime = 0;
 		while (currentTime < 10) {
@@ -293,7 +293,7 @@ uint32_t lastRepeatTime = 0;
 		USER_LED_BLINK();
 	}
 
-	void testTime(void) {
+	void TEST_TIME(void) {
 		wakeUpTime = 0;
 		HAL_Delay(3000); // MOVE PHYSICAL TIME KNOB TO 0
 		if (wakeUpTime == 0) USER_LED_BLINK();
@@ -305,19 +305,19 @@ uint32_t lastRepeatTime = 0;
 		if (wakeUpTime > 5 * 60 * 60 && wakeUpTime < 7 * 60 * 60) USER_LED_BLINK();
 	}
 
-	void testMute(void) {
+	void TEST_MUTE(void) {
 		SOUND_RUMBLE(.5);
 		HAL_Delay(3000); // PRESS PHYSICAL MUTE SWITCH
 		USER_LED_BLINK();
 	}
 
-	void testSkip(void) {
+	void TEST_SKIP(void) {
 		wakeUpTime == 100;
 		HAL_Delay(3000); // PRESS PHYSICAL SKIP BUTTON
 		if (wakeUpTime >= 200) USER_LED_BLINK();
 	}
 
-	void testStop(void) {
+	void TEST_STOP(void) {
 		wakeUpTime == currentTime;
 		SOUND_ALARM();
 		HAL_Delay(3000); // PRESS PHYSICAL STOP BUTTON
@@ -332,7 +332,23 @@ uint32_t lastRepeatTime = 0;
   */
 int main(void)
 {
+	HAL_DELAY(2000);
+	TEST_VOLUME();
 
+	HAL_DELAY(2000);
+	TEST_TIME();
+
+	HAL_DELAY(2000);
+	TEST_MUTE();
+
+	HAL_DELAY(2000);
+	TEST_MUTE();
+
+	HAL_DELAY(2000);
+	TEST_SKIP();
+
+	HAL_DELAY(2000);
+	TEST_STOP();
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
