@@ -18,6 +18,8 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include <math.h>
+#include <stdlib.h>
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -42,6 +44,8 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 ADC_HandleTypeDef hadc2;
+DMA_HandleTypeDef hdma_adc1;
+DMA_HandleTypeDef hdma_adc2;
 
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
@@ -55,6 +59,7 @@ UART_HandleTypeDef huart5;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_UART5_Init(void);
 static void MX_ADC2_Init(void);
@@ -80,7 +85,7 @@ uint8_t LED_ARRAY[16];
 // the current time according to the MPU, updated every loop
 uint32_t currentTime = 0;
 // the total length of time between 0 and 12 hours (s)
-const uint32_t totalTime = 60 * 60 * 12;
+const uint16_t totalTime = 60 * 60 * 12;
 // the time at which to sound the alarm (in ms?)
 uint32_t wakeUpTime = 0; //TO-DO
 // boolean to track whether or not to sound the alarm
@@ -89,10 +94,18 @@ uint8_t wokeUp = 1;
 uint8_t oversleeps = 0;
 uint32_t lastRepeatTime = 0;
 
+// ADC-DMA
+#define ADC1_DMA_BUFFER_SIZE 100
+volatile uint16_t adc1_dma_buffer[ADC1_DMA_BUFFER_SIZE];
+volatile uint32_t avgBuffer = 0;
+#define ADC2_DMA_BUFFER_SIZE 1
+volatile uint8_t adc2_dma_buffer[ADC2_DMA_BUFFER_SIZE];
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
 
 
 	// LED ARRAY //////////////////////////////////////////////////////////////////////////
@@ -141,7 +154,7 @@ uint32_t lastRepeatTime = 0;
 
 	// RUMBLE MOTORS //////////////////////////////////////////////////////////////////////
 
-	void SOUND_RUMBLE(float speed) {
+	void SOUND_RUMBLE(double speed) {
 		__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_3, (uint8_t) speed * 1400);
 	}
 
@@ -149,7 +162,7 @@ uint32_t lastRepeatTime = 0;
 		SOUND_RUMBLE(0);
 	}
 
-	// VOLUME POTENTIOMETER ///////////////////////////////////////////////////////////////
+	// VOLUME POTENTIOMETEqR ///////////////////////////////////////////////////////////////
 
 	uint8_t CHECKSUM_VOLUME(uint8_t volume) {
 		return 0xD7 + 30 - volume;
@@ -157,8 +170,7 @@ uint32_t lastRepeatTime = 0;
 
 	void UPDATE_VOLUME(void) {
 		// convert analog pot value to volume
-		HAL_ADC_PollForConversion(&hadc2, HAL_MAX_DELAY);
-		volume = (float) (HAL_ADC_GetValue(&hadc2)) / 64 * 30;
+		volume = (double) *adc2_dma_buffer / 64 * 30;
 		// send command to MP3 Module
 		UART_VOLUME[6] = volume;
 		UART_VOLUME[8] = CHECKSUM_VOLUME(volume);
@@ -167,11 +179,29 @@ uint32_t lastRepeatTime = 0;
 
 	// TIME POTENTIOMETER ///////////////////////////////////////////////////////////////
 
+	/*
+	 * Moving average filter
+	 * If the average of the values in the ADC1 DMA buffer
+	 * has changed a sufficient amount, set a new timer value
+	 */
+	void CALC_AVG() {
+		// calculate the current avg of pot values in DMA buffer
+		uint32_t avg = 0;
+		for (int i = 0; i < ADC1_DMA_BUFFER_SIZE; i++) {
+			avg += adc1_dma_buffer[i];
+		}
+		avg /= (double) ADC1_DMA_BUFFER_SIZE;
+
+		if (abs(avg - avgBuffer) > .03 * 1024) {
+			avgBuffer = avg;
+			wakeUpTime = (double) avgBuffer / 1024 * totalTime + currentTime;
+		}
+
+	}
+
 	void UPDATE_TIME(void) {
 		// convert analog pot value to time
-		HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-		// set new time
-		wakeUpTime = (float) (HAL_ADC_GetValue(&hadc1)) / 1024 * totalTime + currentTime;
+		CALC_AVG();
 		// light up the corresponding number of LEDs
 		CALC_LED();
 		UPDATE_LED();
@@ -210,14 +240,14 @@ uint32_t lastRepeatTime = 0;
 	void SOUND_ALARM(void) {
 		// if it has been [the waiting times of the alarm before sounding again when oversleeping; 9, 6, and 3 minutes]
 		// then resound the alarm and cue the rumble motors
-		if (currentTime - lastRepeatTime > ((4 - oversleeps) % 4) * totalTime / 144.0f) {
+		if (currentTime - lastRepeatTime > ((4 - oversleeps) % 4) * totalTime / 144.0) {
 			MP3_PLAY();
-			SOUND_RUMBLE(oversleeps / 3.0f);
+			SOUND_RUMBLE(oversleeps / 3.0);
 			oversleeps++; // change the oversleeping tracker variable
 			lastRepeatTime = currentTime; // change the last repeat time tracker variable
 		}
 		// stop the rumble motors after 9 seconds
-		if (currentTime - lastRepeatTime > totalTime / 4800.0f) {
+		if (currentTime - lastRepeatTime > totalTime / 4800.0) {
 			SOUND_RUMBLE(0);
 			// once the 3rd oversleep has ended, reset everything and wait for the next day
 			if (oversleeps == 4) {
@@ -231,18 +261,11 @@ uint32_t lastRepeatTime = 0;
 
 	void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 		if (GPIO_Pin == STOP_Pin) {
-			MP3_PLAY();
-			HAL_Delay(2000);
 			STOP_ALARM();
-			USER_LED_BLINK();
 		}
 
 		if (GPIO_Pin == SKIP_Pin) {
-			wakeUpTime == 100;
 			SKIP_ALARM();
-			if (wakeUpTime > 199) {
-				USER_LED_BLINK();
-			}
 		}
 
 		if (GPIO_Pin == MUTE_Pin) {
@@ -270,16 +293,16 @@ uint32_t lastRepeatTime = 0;
 		HAL_GPIO_WritePin(USER_LED_GPIO_Port, USER_LED_Pin, bit);
 	}
 
-	void USER_LED_BLINK(float durSeconds) {
-		USER_LED(0);
-		HAL_Delay(durSeconds * 1000);
+	void USER_LED_BLINK_DUR(double durSeconds) {
 		USER_LED(1);
+		HAL_Delay(durSeconds * 1000);
+		USER_LED(0);
 	}
 
 	void USER_LED_BLINK() {
-		USER_LED(0);
-		HAL_Delay(.5 * 1000);
 		USER_LED(1);
+		HAL_Delay(.5 * 1000);
+		USER_LED(0);
 	}
 
 
@@ -312,13 +335,13 @@ uint32_t lastRepeatTime = 0;
 	}
 
 	void TEST_SKIP(void) {
-		wakeUpTime == 100;
+		wakeUpTime = 100;
 		HAL_Delay(3000); // PRESS PHYSICAL SKIP BUTTON
 		if (wakeUpTime >= 200) USER_LED_BLINK();
 	}
 
 	void TEST_STOP(void) {
-		wakeUpTime == currentTime;
+		wakeUpTime = currentTime;
 		SOUND_ALARM();
 		HAL_Delay(3000); // PRESS PHYSICAL STOP BUTTON
 		USER_LED_BLINK();
@@ -332,23 +355,7 @@ uint32_t lastRepeatTime = 0;
   */
 int main(void)
 {
-	HAL_DELAY(2000);
-	TEST_VOLUME();
 
-	HAL_DELAY(2000);
-	TEST_TIME();
-
-	HAL_DELAY(2000);
-	TEST_MUTE();
-
-	HAL_DELAY(2000);
-	TEST_MUTE();
-
-	HAL_DELAY(2000);
-	TEST_SKIP();
-
-	HAL_DELAY(2000);
-	TEST_STOP();
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
@@ -371,23 +378,49 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_ADC1_Init();
   MX_UART5_Init();
   MX_ADC2_Init();
   MX_TIM3_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
+
   HAL_TIM_Base_Start_IT(&htim3);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
 
+  HAL_ADC_Start(&hadc1);
+  HAL_ADC_Start(&hadc2);
+
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t *) adc1_dma_buffer, ADC1_DMA_BUFFER_SIZE);
+  HAL_ADC_Start_DMA(&hadc2, (uint32_t *) adc2_dma_buffer, ADC2_DMA_BUFFER_SIZE);
+
+  USER_LED_BLINK();
+
+  HAL_Delay(2000);
+  TEST_VOLUME();
+
+  HAL_Delay(2000);
+  TEST_TIME();
+
+  HAL_Delay(2000);
+  TEST_MUTE();
+
+  HAL_Delay(2000);
+  TEST_SKIP();
+
+  HAL_Delay(2000);
+  TEST_STOP();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  UPDATE_VOLUME();
+	  UPDATE_TIME();
     /* USER CODE END WHILE */
-	
+
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -464,13 +497,13 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV8;
   hadc1.Init.Resolution = ADC_RESOLUTION_10B;
   hadc1.Init.ScanConvMode = DISABLE;
-  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.ContinuousConvMode = ENABLE;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.NbrOfConversion = 1;
-  hadc1.Init.DMAContinuousRequests = DISABLE;
+  hadc1.Init.DMAContinuousRequests = ENABLE;
   hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
   {
@@ -516,13 +549,13 @@ static void MX_ADC2_Init(void)
   hadc2.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV8;
   hadc2.Init.Resolution = ADC_RESOLUTION_6B;
   hadc2.Init.ScanConvMode = DISABLE;
-  hadc2.Init.ContinuousConvMode = DISABLE;
+  hadc2.Init.ContinuousConvMode = ENABLE;
   hadc2.Init.DiscontinuousConvMode = DISABLE;
   hadc2.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
   hadc2.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc2.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc2.Init.NbrOfConversion = 1;
-  hadc2.Init.DMAContinuousRequests = DISABLE;
+  hadc2.Init.DMAContinuousRequests = ENABLE;
   hadc2.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
   if (HAL_ADC_Init(&hadc2) != HAL_OK)
   {
@@ -677,7 +710,27 @@ static void MX_UART5_Init(void)
   }
   /* USER CODE BEGIN UART5_Init 2 */
   MP3_RESET();
+  HAL_Delay(3000);
   /* USER CODE END UART5_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA2_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA2_Stream0_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
+  /* DMA2_Stream2_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream2_IRQn);
 
 }
 
